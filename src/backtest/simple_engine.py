@@ -11,6 +11,7 @@ from loguru import logger
 from src.backtest.portfolio import Portfolio
 from src.strategy.base import BaseStrategy
 from src.config.settings import get_settings
+from src.utils.metrics import calculate_all_metrics
 
 
 class SimpleBacktestEngine:
@@ -103,13 +104,21 @@ class SimpleBacktestEngine:
                 if self.portfolio.get_position(self.ticker):
                     current_quantity = self.portfolio.get_position(self.ticker).quantity
                 
+                # Mode 정보 전달 (MovingAverageShannonHybrid 전략용)
+                mode = row.get("Mode", None)
+                ticker_param = row.get("Ticker", self.ticker)
+                bb_width = row.get("BB_Width", None)
+                
                 quantity = self.strategy.calculate_position_size(
                     portfolio_value=portfolio_value,
                     price=current_price,
                     signal=signal,
                     current_quantity=current_quantity,
                     cash=self.portfolio.cash,
-                    commission_rate=self.commission_rate
+                    commission_rate=self.commission_rate,
+                    mode=mode,
+                    ticker=ticker_param,
+                    bb_width=bb_width
                 )
                 
                 # 거래 실행 (리밸런싱 포함)
@@ -153,7 +162,10 @@ class SimpleBacktestEngine:
         years = days / 365.25
         annualized_return = ((final_value / self.initial_cash) ** (1 / years) - 1) * 100 if years > 0 else 0
         
-        return {
+        # 리스크 보정 지표 계산
+        metrics = calculate_all_metrics(self.results, self.initial_cash)
+        
+        summary = {
             "Strategy": self.strategy.name if self.strategy else "N/A",
             "Ticker": self.ticker,
             "Period": f"{self.results.index[0].strftime('%Y-%m-%d')} ~ {self.results.index[-1].strftime('%Y-%m-%d')}",
@@ -164,6 +176,22 @@ class SimpleBacktestEngine:
             "Annualized Return": f"{annualized_return:.2f}%",
             "Total Trades": len(self.portfolio.trades),
         }
+        
+        # 추가 지표 추가
+        if metrics:
+            summary.update({
+                "Sharpe Ratio": f"{metrics.get('sharpe_ratio', 0):.2f}",
+                "Sortino Ratio": f"{metrics.get('sortino_ratio', 0):.2f}",
+                "Calmar Ratio": f"{metrics.get('calmar_ratio', 0):.2f}",
+                "Volatility": f"{metrics.get('volatility', 0):.2f}%",
+                "Max Drawdown": f"{metrics.get('max_drawdown', 0):.2f}%",
+            })
+            if metrics.get("recovery_days") is not None:
+                summary["Recovery Days"] = f"{metrics['recovery_days']}일"
+            else:
+                summary["Recovery Days"] = "미회복"
+        
+        return summary
 
     def get_holdings(self) -> pd.DataFrame:
         """현재 보유 종목"""

@@ -17,8 +17,8 @@ from src.backtest.multi_asset_engine import MultiAssetBacktestEngine
 from src.strategy.buyhold import BuyHoldStrategy
 from src.strategy.shannon import ShannonStrategy
 from src.strategy.moving_average import MovingAverageStrategy
-from src.strategy.ma_breakout import MovingAverageBreakoutStrategy
-from src.strategy.ma_rebalance import MovingAverageRebalanceStrategy
+from src.strategy.ma_shannon_hybrid import MovingAverageShannonHybridStrategy
+from src.strategy.smart_ma_shannon_hybrid import SmartMovingAverageShannonHybridStrategy as SmartMAStrategy
 from src.utils.logger import setup_logger
 from loguru import logger
 
@@ -28,8 +28,8 @@ STRATEGY_MAP = {
     "shannon": ShannonStrategy,
     "moving_average": MovingAverageStrategy,
     "ma": MovingAverageStrategy,
-    "ma_breakout": MovingAverageBreakoutStrategy,
-    "ma_rebalance": MovingAverageRebalanceStrategy,
+    "ma_shannon_hybrid": MovingAverageShannonHybridStrategy,
+    "smart_ma_shannon_hybrid": SmartMAStrategy,
 }
 
 
@@ -130,27 +130,24 @@ def run_backtest(config_path: str = "config.yml"):
             if not strategy.bond_ticker or strategy.bond_ticker not in tickers:
                 strategy.bond_ticker = tickers[1] if len(tickers) > 1 else tickers[0]
         
-        # MovingAverageBreakout 전략: 다중 종목 필요 (TQQQ + QLD)
-        elif isinstance(strategy, MovingAverageBreakoutStrategy):
-            use_multi_asset = True
-            # required_tickers는 conservative_ticker와 aggressive_ticker
-            required_for_strategy = {strategy.conservative_ticker, strategy.aggressive_ticker}
-            if not required_for_strategy.issubset(set(tickers)):
-                missing = required_for_strategy - set(tickers)
-                logger.warning(f"{strategy.name}: 필요한 종목이 assets.tickers에 없습니다: {missing}")
-                logger.warning(f"현재 종목: {', '.join(tickers)}")
-                logger.warning(f"필요한 종목: {', '.join(required_for_strategy)}")
+        # MovingAverageShannonHybrid 전략: 단일 종목 사용
+        elif isinstance(strategy, MovingAverageShannonHybridStrategy):
+            use_multi_asset = False
+            if not strategy.stock_ticker or strategy.stock_ticker not in tickers:
+                strategy.stock_ticker = tickers[0]
+            if strategy.stock_ticker not in tickers:
+                logger.warning(f"{strategy.name}: stock_ticker '{strategy.stock_ticker}'가 assets.tickers에 없습니다.")
+                logger.warning(f"사용 가능한 종목: {', '.join(tickers)}")
                 continue
         
-        # MovingAverageRebalance 전략: 다중 종목 필요 (stock_ticker1 + stock_ticker2 + bond_ticker)
-        elif isinstance(strategy, MovingAverageRebalanceStrategy):
-            use_multi_asset = True
-            required_for_strategy = {strategy.stock_ticker1, strategy.stock_ticker2, strategy.bond_ticker}
-            if not required_for_strategy.issubset(set(tickers)):
-                missing = required_for_strategy - set(tickers)
-                logger.warning(f"{strategy.name}: 필요한 종목이 assets.tickers에 없습니다: {missing}")
-                logger.warning(f"현재 종목: {', '.join(tickers)}")
-                logger.warning(f"필요한 종목: {', '.join(required_for_strategy)}")
+        # SmartMovingAverageShannonHybrid 전략: 단일 종목 사용
+        elif isinstance(strategy, SmartMAStrategy):
+            use_multi_asset = False
+            if not strategy.stock_ticker or strategy.stock_ticker not in tickers:
+                strategy.stock_ticker = tickers[0]
+            if strategy.stock_ticker not in tickers:
+                logger.warning(f"{strategy.name}: stock_ticker '{strategy.stock_ticker}'가 assets.tickers에 없습니다.")
+                logger.warning(f"사용 가능한 종목: {', '.join(tickers)}")
                 continue
         
         # 백테스팅 엔진 생성
@@ -159,22 +156,10 @@ def run_backtest(config_path: str = "config.yml"):
             required_tickers = []
             
             # 전략별 required_tickers 설정
-            if isinstance(strategy, MovingAverageBreakoutStrategy):
-                required_tickers = [strategy.conservative_ticker, strategy.aggressive_ticker]
-                # base_ticker도 데이터에 있어야 함 (신호 생성용)
-                if strategy.base_ticker not in required_tickers:
-                    # base_ticker도 required_tickers에 추가 (신호 참조용)
-                    required_tickers.append(strategy.base_ticker)
-            elif isinstance(strategy, MovingAverageRebalanceStrategy):
-                required_tickers = [strategy.stock_ticker1, strategy.stock_ticker2, strategy.bond_ticker]
-                # base_ticker도 데이터에 있어야 함 (신호 생성용)
-                if strategy.base_ticker not in required_tickers:
-                    required_tickers.append(strategy.base_ticker)
-            else:
-                if strategy.stock_ticker:
-                    required_tickers.append(strategy.stock_ticker)
-                if strategy.bond_ticker:
-                    required_tickers.append(strategy.bond_ticker)
+            if strategy.stock_ticker:
+                required_tickers.append(strategy.stock_ticker)
+            if strategy.bond_ticker:
+                required_tickers.append(strategy.bond_ticker)
             
             # 요구되는 종목이 모두 data_dict에 있는지 확인
             if not all(t in data_dict for t in required_tickers):
@@ -203,39 +188,6 @@ def run_backtest(config_path: str = "config.yml"):
                 bond_df = data_dict[strategy.bond_ticker].copy()
                 bond_df["Signal"] = 0
                 signals_dict[strategy.bond_ticker] = bond_df
-            
-            # MovingAverageBreakout 전략: base_ticker 데이터로 신호 생성
-            elif isinstance(strategy, MovingAverageBreakoutStrategy):
-                base_data = data_dict[strategy.base_ticker]
-                df_with_signals = strategy.generate_signals(base_data)
-                
-                # base_ticker에 신호 적용
-                signals_dict[strategy.base_ticker] = df_with_signals
-                
-                # conservative_ticker와 aggressive_ticker에도 신호 정보 복사 (TargetTicker는 base_ticker에서 참조)
-                for ticker in [strategy.conservative_ticker, strategy.aggressive_ticker]:
-                    if ticker != strategy.base_ticker:
-                        ticker_df = data_dict[ticker].copy()
-                        # base_ticker의 Signal과 TargetTicker를 복사
-                        ticker_df["Signal"] = df_with_signals["Signal"]
-                        ticker_df["TargetTicker"] = df_with_signals["TargetTicker"]
-                        signals_dict[ticker] = ticker_df
-            
-            # MovingAverageRebalance 전략: base_ticker 데이터로 신호 생성
-            elif isinstance(strategy, MovingAverageRebalanceStrategy):
-                base_data = data_dict[strategy.base_ticker]
-                df_with_signals = strategy.generate_signals(base_data)
-                
-                # base_ticker에 신호 적용
-                signals_dict[strategy.base_ticker] = df_with_signals
-                
-                # stock_ticker1, stock_ticker2, bond_ticker에도 신호 정보 복사
-                for ticker in [strategy.stock_ticker1, strategy.stock_ticker2, strategy.bond_ticker]:
-                    if ticker != strategy.base_ticker:
-                        ticker_df = data_dict[ticker].copy()
-                        ticker_df["Signal"] = df_with_signals["Signal"]
-                        ticker_df["TargetTicker"] = df_with_signals["TargetTicker"]
-                        signals_dict[ticker] = ticker_df
             
             else:
                 # Shannon 등 다른 전략: 각 종목별로 신호 생성

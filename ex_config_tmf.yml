@@ -9,7 +9,7 @@ assets:
     - "TMF"   # 채권 종목 (20년 국채 3배 레버리지 ETF)
 
 backtest:
-  start_date: "2023-01-01"
+  start_date: "2019-01-01"
   end_date: "2025-09-01"
   initial_cash: 1000
 
