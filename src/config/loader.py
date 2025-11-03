@@ -79,6 +79,8 @@ class BacktestConfig(BaseModel):
     end_date: str
     initial_cash: float = Field(default=100_000, gt=0, description="초기 자본금")
     commission_rate: float = Field(default=0.001, ge=0, le=0.01, description="수수료율")
+    monthly_addition: Optional[float] = Field(default=0, ge=0, description="매월 추가 투자금")
+    exchange_rate: Optional[float] = Field(default=1.0, gt=0, description="환율 (예: 1450 = 1달러당 1450원)")
 
     @field_validator("start_date", "end_date")
     @classmethod

@@ -93,6 +93,25 @@ class Portfolio:
         """
         if ticker in self.positions:
             self.positions[ticker].current_price = price
+    
+    def receive_dividend(self, ticker: str, dividend_per_share: float, date: datetime):
+        """
+        배당금 수령
+        
+        Args:
+            ticker: 종목 코드
+            dividend_per_share: 주당 배당금
+            date: 배당일
+        """
+        if ticker not in self.positions:
+            return
+        
+        pos = self.positions[ticker]
+        total_dividend = pos.quantity * dividend_per_share
+        
+        if total_dividend > 0:
+            self.cash += total_dividend
+            logger.debug(f"배당금 수령 [{ticker}] {pos.quantity}주 × ${dividend_per_share:.4f} = ${total_dividend:.2f}")
 
     def buy(
         self,

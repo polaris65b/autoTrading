@@ -22,7 +22,8 @@ class MultiAssetBacktestEngine:
         self,
         tickers: List[str],
         initial_cash: Optional[float] = None,
-        commission_rate: Optional[float] = None
+        commission_rate: Optional[float] = None,
+        monthly_addition: Optional[float] = None
     ):
         """
         초기화
@@ -31,12 +32,14 @@ class MultiAssetBacktestEngine:
             tickers: 거래할 종목 리스트 (예: ["TQQQ", "TMF"])
             initial_cash: 초기 자본금
             commission_rate: 수수료율
+            monthly_addition: 매월 추가 투자금
         """
         settings = get_settings()
         
         self.tickers = tickers
         self.initial_cash = initial_cash or settings.DEFAULT_INITIAL_CASH
         self.commission_rate = commission_rate or settings.DEFAULT_COMMISSION
+        self.monthly_addition = monthly_addition or 0
         
         self.portfolio = Portfolio(
             initial_cash=self.initial_cash,
@@ -46,6 +49,7 @@ class MultiAssetBacktestEngine:
         self.strategy: Optional[BaseStrategy] = None
         self.results: pd.DataFrame = pd.DataFrame()
         self.data_dict: Dict[str, pd.DataFrame] = {}
+        self.last_month = None  # 매월 추가 투자 추적
 
     def set_strategy(self, strategy: BaseStrategy):
         """전략 설정"""
@@ -138,7 +142,19 @@ class MultiAssetBacktestEngine:
         
         # 백테스팅 실행
         for date in all_dates:
-            # 모든 종목의 현재가 업데이트
+            # 매월 추가 투자 처리
+            if self.monthly_addition > 0:
+                # Period 변환 시 타임존 정보 손실 경고 회피
+                if isinstance(date, pd.Timestamp):
+                    current_month = date.strftime('%Y-%m')
+                else:
+                    current_month = date.strftime('%Y-%m')
+                if self.last_month != current_month:
+                    self.portfolio.cash += self.monthly_addition
+                    self.last_month = current_month
+                    logger.debug(f"매월 추가 투자: ${self.monthly_addition:,.2f} (날짜: {date.date()})")
+            
+            # 모든 종목의 현재가 업데이트 및 배당금 처리
             prices = {}
             for ticker in self.tickers:
                 if ticker in self.data_dict:
@@ -150,6 +166,12 @@ class MultiAssetBacktestEngine:
                         # 포트폴리오 가격 업데이트
                         if ticker in self.portfolio.positions:
                             self.portfolio.update_price(ticker, price)
+                            
+                            # 배당금 처리
+                            if "Dividends" in df.columns:
+                                dividend = df.loc[date, "Dividends"]
+                                if pd.notna(dividend) and dividend > 0:
+                                    self.portfolio.receive_dividend(ticker, dividend, date)
             
             # MovingAverage 전략 특별 처리: 주식 종목 신호 발생 시 모든 종목 처리
             processed_tickers = set()
@@ -169,7 +191,7 @@ class MultiAssetBacktestEngine:
                 if stock_ticker in prices and stock_ticker in self.data_dict and date in self.data_dict[stock_ticker].index:
                     stock_df = self.data_dict[stock_ticker]
                     
-                    # Signal과 TargetTicker 직접 접근
+                    # Signal과 TargetTicker, Mode 직접 접근
                     if "Signal" in stock_df.columns and date in stock_df.index:
                         stock_signal = stock_df.loc[date, "Signal"]
                     else:
@@ -183,19 +205,26 @@ class MultiAssetBacktestEngine:
                     else:
                         target_ticker = None
                     
+                    if "Mode" in stock_df.columns and date in stock_df.index:
+                        current_mode = stock_df.loc[date, "Mode"]
+                        if pd.isna(current_mode):
+                            current_mode = None
+                    else:
+                        current_mode = None
+                    
                     # 신호가 있는 경우에만 거래 처리 (신호 없이는 보유 유지)
                     if stock_signal != 0:
                         if target_ticker is None or pd.isna(target_ticker):
                             # TargetTicker가 없으면 current_holding 사용 (하위 호환)
                             target_ticker = getattr(self.strategy, 'current_holding', None)
                         
-                        # Shannon 전략: stock_ticker와 bond_ticker를 가진 전략
-                        # hasattr(self.strategy, 'stock_ticker')와 hasattr(self.strategy, 'bond_ticker')로 체크
-                        if hasattr(self.strategy, 'stock_ticker') and hasattr(self.strategy, 'bond_ticker') and hasattr(self.strategy, 'use_bond') and not hasattr(self.strategy, 'stock_ticker1'):
+                        # Shannon 전략: stock_ticker와 (bond_ticker 또는 현금)을 가진 전략
+                        # 현금 버전(bond_ticker=None)도 처리
+                        if hasattr(self.strategy, 'stock_ticker') and hasattr(self.strategy, 'use_bond') and not hasattr(self.strategy, 'stock_ticker1'):
                             # Shannon 전략 처리
                             portfolio_value = self.portfolio.total_value
                             
-                            # stock_ticker와 bond_ticker의 현재 가치 계산
+                            # stock_ticker와 bond_ticker(또는 현금)의 현재 가치 계산
                             stock_value = 0.0
                             bond_value = 0.0
                             stock_quantity = 0
@@ -206,7 +235,7 @@ class MultiAssetBacktestEngine:
                             # 가격 먼저 읽기
                             if self.strategy.stock_ticker in prices:
                                 stock_price = prices[self.strategy.stock_ticker]
-                            if self.strategy.bond_ticker in prices:
+                            if self.strategy.use_bond and self.strategy.bond_ticker and self.strategy.bond_ticker in prices:
                                 bond_price = prices[self.strategy.bond_ticker]
                             
                             if self.strategy.stock_ticker in self.portfolio.positions:
@@ -214,10 +243,14 @@ class MultiAssetBacktestEngine:
                                 stock_quantity = pos.quantity
                                 stock_value = stock_quantity * stock_price
                             
-                            if self.strategy.bond_ticker in self.portfolio.positions:
-                                pos = self.portfolio.get_position(self.strategy.bond_ticker)
-                                bond_quantity = pos.quantity
-                                bond_value = bond_quantity * bond_price
+                            if self.strategy.use_bond and self.strategy.bond_ticker:
+                                if self.strategy.bond_ticker in self.portfolio.positions:
+                                    pos = self.portfolio.get_position(self.strategy.bond_ticker)
+                                    bond_quantity = pos.quantity
+                                    bond_value = bond_quantity * bond_price
+                            else:
+                                # 현금 버전: bond_value는 현금으로 계산
+                                bond_value = self.portfolio.cash
                             
                             # 초기 진입: stock과 bond가 모두 없으면 초기 매수
                             if stock_quantity == 0 and bond_quantity == 0:
@@ -231,7 +264,8 @@ class MultiAssetBacktestEngine:
                                         cash=self.portfolio.cash,
                                         current_bond_value=0.0,
                                         commission_rate=self.commission_rate,
-                                        ticker=self.strategy.stock_ticker
+                                        ticker=self.strategy.stock_ticker,
+                                        mode=current_mode if current_mode else (getattr(self.strategy, 'current_mode', None))
                                     )
                                     if stock_target_quantity > 0:
                                         try:
@@ -241,9 +275,10 @@ class MultiAssetBacktestEngine:
                                             logger.error(f"초기 매수 실패 [{self.strategy.stock_ticker}] {e}")
                                 
                                 # bond 초기 매수 (stock 매수 후 포트폴리오 가치 재계산)
+                                # 현금 버전은 bond_ticker가 없으므로 건너뜀
                                 portfolio_value = self.portfolio.total_value
                                 
-                                if self.strategy.bond_ticker in prices and bond_price > 0 and self.strategy.use_bond:
+                                if self.strategy.use_bond and self.strategy.bond_ticker and self.strategy.bond_ticker in prices and bond_price > 0:
                                     bond_target_quantity = self.strategy.calculate_position_size(
                                         portfolio_value=portfolio_value,
                                         price=bond_price,
@@ -253,7 +288,8 @@ class MultiAssetBacktestEngine:
                                         current_stock_value=stock_value if stock_price > 0 else 0.0,
                                         current_bond_value=0.0,
                                         commission_rate=self.commission_rate,
-                                        ticker=self.strategy.bond_ticker
+                                        ticker=self.strategy.bond_ticker,
+                                        mode=current_mode if current_mode else (getattr(self.strategy, 'current_mode', None))
                                     )
                                     if bond_target_quantity > 0:
                                         try:
@@ -262,8 +298,12 @@ class MultiAssetBacktestEngine:
                                         except Exception as e:
                                             logger.error(f"초기 매수 실패 [{self.strategy.bond_ticker}] {e}")
                             else:
-                                # 밴딩 리밸런싱: 두 종목 모두 처리
-                                for ticker in [self.strategy.stock_ticker, self.strategy.bond_ticker]:
+                                # 밴딩 리밸런싱: stock_ticker만 처리 (현금 버전) 또는 두 종목 모두 처리 (bond 버전)
+                                tickers_to_process = [self.strategy.stock_ticker]
+                                if self.strategy.use_bond and self.strategy.bond_ticker:
+                                    tickers_to_process.append(self.strategy.bond_ticker)
+                                
+                                for ticker in tickers_to_process:
                                     if ticker not in prices or ticker in processed_tickers:
                                         continue
                                     
@@ -275,9 +315,16 @@ class MultiAssetBacktestEngine:
                                     
                                     # 다른 종목 가치 계산
                                     if ticker == self.strategy.stock_ticker:
-                                        other_value = bond_value
+                                        # TQQQ 처리 시: bond_ticker 또는 현금 가치
+                                        other_value = bond_value if self.strategy.use_bond else self.portfolio.cash
                                     else:
+                                        # bond_ticker 처리 시: TQQQ 가치
                                         other_value = stock_value
+                                    
+                                    # 현금 버전과 bond 버전 모두 current_bond_value 전달
+                                    # 현금 버전: bond_value = portfolio.cash
+                                    # bond 버전: bond_value = bond_ticker 가치
+                                    current_bond_val = bond_value if self.strategy.use_bond else self.portfolio.cash
                                     
                                     quantity = self.strategy.calculate_position_size(
                                         portfolio_value=portfolio_value,
@@ -285,10 +332,11 @@ class MultiAssetBacktestEngine:
                                         signal=stock_signal,
                                         current_quantity=ticker_current_quantity,
                                         cash=self.portfolio.cash,
-                                        current_bond_value=bond_value,
+                                        current_bond_value=current_bond_val,
                                         current_stock_value=stock_value,
                                         commission_rate=self.commission_rate,
-                                        ticker=ticker
+                                        ticker=ticker,
+                                        mode=current_mode if current_mode else (getattr(self.strategy, 'current_mode', None))
                                     )
                                     
                                     if quantity > 0:
@@ -303,6 +351,135 @@ class MultiAssetBacktestEngine:
                                             logger.warning(f"리밸런싱 매도 실패 [{ticker}] {e}")
                                     
                                     processed_tickers.add(ticker)
+                        
+                        # InverseMA 전략: Signal=1일 때 BELOW 모드 전환 (TQQQ 100%)
+                        elif hasattr(self.strategy, 'qqq_ticker') and hasattr(self.strategy, 'tqqq_ticker') and stock_signal == 1:
+                            # BELOW 모드: TQQQ 100% 보유 (QQQ 전고점 회복까지 매도 금지)
+                            portfolio_value = self.portfolio.total_value
+                            
+                            # QQQ 가격 확인 (전고점 회복 체크용)
+                            qqq_price = 0.0
+                            if self.strategy.qqq_ticker in prices:
+                                qqq_price = prices[self.strategy.qqq_ticker]
+                            
+                            # QQQ와 다른 종목 매도
+                            for ticker in self.tickers:
+                                if ticker == self.strategy.tqqq_ticker:
+                                    continue
+                                if ticker not in prices or ticker in processed_tickers:
+                                    continue
+                                if self.portfolio.get_position(ticker):
+                                    pos = self.portfolio.get_position(ticker)
+                                    if pos.quantity > 0:
+                                        try:
+                                            self.portfolio.sell(ticker, pos.quantity, prices[ticker], date)
+                                            processed_tickers.add(ticker)
+                                        except Exception as e:
+                                            logger.warning(f"매도 실패 [{ticker}] {e}")
+                            
+                            # TQQQ 100% 매수
+                            portfolio_value = self.portfolio.total_value
+                            if self.strategy.tqqq_ticker in prices:
+                                tqqq_price = prices[self.strategy.tqqq_ticker]
+                                if tqqq_price > 0:
+                                    tqqq_quantity = 0
+                                    if self.portfolio.get_position(self.strategy.tqqq_ticker):
+                                        tqqq_quantity = self.portfolio.get_position(self.strategy.tqqq_ticker).quantity
+                                    
+                                    quantity = self.strategy.calculate_position_size(
+                                        portfolio_value=portfolio_value,
+                                        price=tqqq_price,
+                                        signal=1,
+                                        current_quantity=tqqq_quantity,
+                                        cash=self.portfolio.cash,
+                                        commission_rate=self.commission_rate,
+                                        ticker=self.strategy.tqqq_ticker,
+                                        mode="BELOW",
+                                        qqq_price=qqq_price
+                                    )
+                                    
+                                    if quantity > 0:
+                                        try:
+                                            self.portfolio.buy(self.strategy.tqqq_ticker, quantity, tqqq_price, date)
+                                            processed_tickers.add(self.strategy.tqqq_ticker)
+                                        except Exception as e:
+                                            logger.warning(f"TQQQ 매수 실패: {e}")
+                        
+                        # InverseMA 전략: Signal=3일 때 ABOVE 모드 리밸런싱 (QQQ:TQQQ 1:1)
+                        elif hasattr(self.strategy, 'qqq_ticker') and hasattr(self.strategy, 'tqqq_ticker') and stock_signal == 3:
+                            # ABOVE 모드: QQQ 50% + TQQQ 50% 밴딩 리밸런싱
+                            portfolio_value = self.portfolio.total_value
+                            
+                            qqq_value = 0.0
+                            tqqq_value = 0.0
+                            qqq_quantity = 0
+                            tqqq_quantity = 0
+                            qqq_price = 0.0
+                            tqqq_price = 0.0
+                            
+                            if self.strategy.qqq_ticker in prices:
+                                qqq_price = prices[self.strategy.qqq_ticker]
+                            if self.strategy.tqqq_ticker in prices:
+                                tqqq_price = prices[self.strategy.tqqq_ticker]
+                            
+                            if self.strategy.qqq_ticker in self.portfolio.positions:
+                                pos = self.portfolio.get_position(self.strategy.qqq_ticker)
+                                qqq_quantity = pos.quantity
+                                qqq_value = qqq_quantity * qqq_price
+                            
+                            if self.strategy.tqqq_ticker in self.portfolio.positions:
+                                pos = self.portfolio.get_position(self.strategy.tqqq_ticker)
+                                tqqq_quantity = pos.quantity
+                                tqqq_value = tqqq_quantity * tqqq_price
+                            
+                            # 밴딩 리밸런싱 체크
+                            needs_rebalance, rebalance_ticker = self.strategy.check_banding_rebalance(
+                                portfolio_value=portfolio_value,
+                                current_qqq_value=qqq_value,
+                                current_tqqq_value=tqqq_value,
+                                qqq_price=qqq_price,
+                                tqqq_price=tqqq_price,
+                                qqq_quantity=qqq_quantity,
+                                tqqq_quantity=tqqq_quantity
+                            )
+                            
+                            # QQQ와 TQQQ 모두 리밸런싱 처리
+                            for ticker in [self.strategy.qqq_ticker, self.strategy.tqqq_ticker]:
+                                if ticker not in prices or ticker in processed_tickers:
+                                    continue
+                                
+                                portfolio_value = self.portfolio.total_value
+                                ticker_price = prices[ticker]
+                                ticker_quantity = 0
+                                if self.portfolio.get_position(ticker):
+                                    ticker_quantity = self.portfolio.get_position(ticker).quantity
+                                
+                                quantity = self.strategy.calculate_position_size(
+                                    portfolio_value=portfolio_value,
+                                    price=ticker_price,
+                                    signal=3,
+                                    current_quantity=ticker_quantity,
+                                    cash=self.portfolio.cash,
+                                    commission_rate=self.commission_rate,
+                                    ticker=ticker,
+                                    mode="ABOVE",
+                                    current_qqq_value=qqq_value,
+                                    current_tqqq_value=tqqq_value,
+                                    qqq_price=qqq_price
+                                )
+                                
+                                if quantity > 0:
+                                    try:
+                                        self.portfolio.buy(ticker, quantity, ticker_price, date)
+                                    except Exception as e:
+                                        logger.warning(f"리밸런싱 매수 실패 [{ticker}] {e}")
+                                elif quantity < 0:
+                                    try:
+                                        self.portfolio.sell(ticker, abs(quantity), ticker_price, date)
+                                    except Exception as e:
+                                        logger.warning(f"리밸런싱 매도 실패 [{ticker}] {e}")
+                                
+                                processed_tickers.add(ticker)
                         
                         # MovingAverageRebalance 전략: Signal=3일 때 리밸런싱 처리
                         elif hasattr(self.strategy, 'stock_ticker1') and stock_signal == 3 and target_ticker == "ABOVE":

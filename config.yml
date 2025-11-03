@@ -10,9 +10,6 @@
 #   3. 실행: python backtest.py -c my_test.yml
 # =============================================================================
 
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# ⭐ 여기만 수정하세요! ⭐
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 assets:
   tickers:
@@ -20,15 +17,18 @@ assets:
     - "BIL"   # 채권 종목 (MovingAverage 전략용 단기채권 ETF)
     - "QQQ"  # 주식 종목 (MovingAverage 전략용 나스닥 100 ETF)
     - "QLD"  # 주식 종목 (MovingAverage 전략용 나스닥 100 ETF)
+    - "UPRO"  # 주식 종목
+    #- "JEPI"  # 주식 종목
+    - "QYLD"  # 커버드콜 ETF (나스닥 100 기반, 2013년 상장)
+    - "XYLD"  # 커버드콜 ETF (S&P 500 기반, 2013년 상장)
 
 backtest:
-  start_date: "2010-01-01"  # 원하면 시작일 변경
-  end_date: "2020-11-01"    # 원하면 종료일 변경
-  initial_cash: 10000      # 원하면 투자금 변경
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 아래는 기본값으로 그대로 두면 됩니다
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  start_date: "2021-01-01"  # 원하면 시작일 변경
+  end_date: "2025-11-01"    # 원하면 종료일 변경
+  initial_cash: 5000000  # 초기 투자금
+  monthly_addition: 500000  # 매월 추가 투자금
+  exchange_rate: 1500  # 환율
+  commission_rate: 0.01  # 수수료율 (0.1%)
 
 portfolio:
   strategies:
@@ -37,33 +37,79 @@ portfolio:
       enabled: true
       params:
         position_pct: 1.0        # 100% 투자
-        stock_ticker: "QLD"     # 주식 종목 (선택사항, 설정 안 하면 첫 번째 ticker 사용)
+        stock_ticker: "TQQQ"     # 주식 종목 (선택사항, 설정 안 하면 첫 번째 ticker 사용)
     
+    #########################################################
     # 섀넌 전략 (현금 50%, 주식 50%)
     - name: "shannon"
       enabled: false  # 비교하려면 true로 변경
       params:
-        stock_pct: 0.9           # 주식 비율 50% (현금 50%)
+        stock_pct: 0.5           # 주식 비율
         stock_ticker: "TQQQ"     # 주식 종목 (선택사항, 설정 안 하면 첫 번째 ticker 사용)
         bond_ticker: "BIL"     # 채권 종목 (설정 시 현금 대신 채권 ETF 사용, assets.tickers에 포함 필요)
         rebalance_mode: "banding"  # 밴딩 방식 (목표 비율에서 벗어날 때만 리밸런싱)
         band_threshold: 0.05      # 밴딩 임계값(너무 작으면 거래가 너무 많아집니다)
-    
-    # 이동평균선 전략 (n일선 위: 주식, n일선 아래: 채권)
+    #########################################################
+    # 이동평균선 전략 - 위 아래
     - name: "moving_average"
       enabled: true
       params:
-        stock_ticker: "TQQQ"     # 주식 종목
-        bond_ticker: "BIL"       # 채권 종목 (assets.tickers에 포함 필요)
-        ma_period: 200           # 이동평균 기간 (예: 50, 100, 200일선)
+        stock_ticker: "TQQQ"     # 주식 종목 (200일선 위)
+        bond_ticker: "BIL"      # 단기채권 ETF (200일선 아래, 현금 대체)
+        ma_period: 200           # 이동평균 기간 (200일선)
     
+    - name: "moving_average"
+      enabled: true
+      params:
+        stock_ticker: "TQQQ"     # 주식 종목 (200일선 위)
+        bond_ticker: "QYLD"      # 커버드콜 ETF (200일선 아래, 나스닥 100 기반, 2013년 상장)
+        ma_period: 200           # 이동평균 기간 (200일선)
+    
+    - name: "moving_average"
+      enabled: true
+      params:
+        stock_ticker: "TQQQ"     # 주식 종목 (200일선 위)
+        bond_ticker: "JEPQ"      # 커버드콜 ETF (200일선 아래, S&P 500 기반, 2013년 상장)
+        ma_period: 200           # 이동평균 기간 (200일선)
+    #########################################################
+    # ma_shannon_hybrid - 현금 버전 (200일선 아래: TQQQ 50% + 현금 50%)
     - name: "ma_shannon_hybrid"
-      enabled: true  # 비교하려면 true로 변경
+      enabled: true
       params:
         stock_ticker: "TQQQ"         # 주식 종목 (assets.tickers에 포함 필요)
+        # bond_ticker: None          # 현금 사용 (설정 안 하면 현금)
         ma_period: 200                # 이동평균 기간 (기본: 200일선)
         stock_pct: 0.5               # 섀넌 모드에서 주식 비율 (기본: 0.5 = 50%)
         band_threshold: 0.1          # 밴딩 임계값 (기본: 0.1 = 10%)
+    
+    # ma_shannon_hybrid - BIL 버전 (200일선 아래: TQQQ 50% + BIL 50%)
+    - name: "ma_shannon_hybrid"
+      enabled: true
+      params:
+        stock_ticker: "TQQQ"         # 주식 종목 (assets.tickers에 포함 필요)
+        bond_ticker: "BIL"           # 채권 종목 (assets.tickers에 포함 필요)
+        ma_period: 200                # 이동평균 기간 (기본: 200일선)
+        stock_pct: 0.5               # 섀넌 모드에서 주식 비율 (기본: 0.5 = 50%)
+        band_threshold: 0.1          # 밴딩 임계값 (기본: 0.1 = 10%)
+    
+    # ma_shannon_hybrid - QYLD 버전 (200일선 아래: TQQQ 50% + QYLD 50%)
+    - name: "ma_shannon_hybrid"
+      enabled: true
+      params:
+        stock_ticker: "TQQQ"         # 주식 종목 (assets.tickers에 포함 필요)
+        bond_ticker: "QYLD"          # 커버드콜 ETF (assets.tickers에 포함 필요)
+        ma_period: 200                # 이동평균 기간 (기본: 200일선)
+        stock_pct: 0.5               # 섀넌 모드에서 주식 비율 (기본: 0.5 = 50%)
+        band_threshold: 0.1          # 밴딩 임계값 (기본: 0.1 = 10%)
+    #########################################################
+    - name: "ma_shannon_hybrid2"
+      enabled: false  # TQQQ 매도 금지 버전 (200일선 아래에서 TQQQ->BIL 전환 불가)
+      params:
+        stock_ticker: "TQQQ"         # 주식 종목 (assets.tickers에 포함 필요)
+        bond_ticker: "BIL"           # 채권 종목 (assets.tickers에 포함 필요)
+        ma_period: 200                # 이동평균 기간 (기본: 200일선)
+        stock_pct: 0.5               # 섀넌 모드에서 주식 비율 (기본: 0.5 = 50%)
+        band_threshold: 0.05          # 밴딩 임계값 (기본: 0.1 = 10%)
     
     - name: "smart_ma_shannon_hybrid"
       enabled: false  # 고도화 전략 (현재 수익률 낮음)
@@ -75,6 +121,21 @@ portfolio:
         bb_std: 2.0                  # 볼린저 밴드 표준편차 (기본: 2.0)
         base_stock_pct: 0.5          # 기본 주식 비율 (기본: 0.5 = 50%)
         trailing_stop_pct: 0.20      # 트레일링 스탑 비율 (기본: 0.20 = 20%)
+    
+    - name: "inver_ma"
+      enabled: false  # Inverse MA 전략
+      params:
+        base_ticker: "QQQ"           # 이동평균선 계산 기준 종목 (assets.tickers에 포함 필요)
+        qqq_ticker: "QQQ"            # QQQ 종목 (assets.tickers에 포함 필요)
+        tqqq_ticker: "TQQQ"          # TQQQ 종목 (assets.tickers에 포함 필요)
+        ma_period: 200               # 이동평균 기간 (기본: 200일선)
+        stock1_pct: 0.5             # QQQ 목표 비율 (기본: 0.5 = 50%)
+        stock2_pct: 0.5             # TQQQ 목표 비율 (기본: 0.5 = 50%)
+        band_threshold: 0.05         # 밴딩 임계값 (기본: 0.05 = 5%)
+      # 전략 설명:
+      # - 200일선 위: QQQ 50% + TQQQ 50% (밴딩 리밸런싱)
+      # - 200일선 아래: TQQQ 100% 보유
+      # - BELOW 모드 진입 시점의 QQQ 전고점을 추적하고, 회복까지 TQQQ 매도 금지
     
     # 비교하려는 전략은 enabled: true, 비교 안 하려면 enabled: false
 

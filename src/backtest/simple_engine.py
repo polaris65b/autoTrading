@@ -10,6 +10,7 @@ from loguru import logger
 
 from src.backtest.portfolio import Portfolio
 from src.strategy.base import BaseStrategy
+from src.strategy.buyhold import BuyHoldStrategy
 from src.config.settings import get_settings
 from src.utils.metrics import calculate_all_metrics
 
@@ -21,7 +22,8 @@ class SimpleBacktestEngine:
         self,
         ticker: str,
         initial_cash: Optional[float] = None,
-        commission_rate: Optional[float] = None
+        commission_rate: Optional[float] = None,
+        monthly_addition: Optional[float] = None
     ):
         """
         초기화
@@ -30,12 +32,14 @@ class SimpleBacktestEngine:
             ticker: 거래할 종목
             initial_cash: 초기 자본금
             commission_rate: 수수료율
+            monthly_addition: 매월 추가 투자금
         """
         settings = get_settings()
         
         self.ticker = ticker
         self.initial_cash = initial_cash or settings.DEFAULT_INITIAL_CASH
         self.commission_rate = commission_rate or settings.DEFAULT_COMMISSION
+        self.monthly_addition = monthly_addition or 0
         
         self.portfolio = Portfolio(
             initial_cash=self.initial_cash,
@@ -44,6 +48,7 @@ class SimpleBacktestEngine:
         
         self.strategy: Optional[BaseStrategy] = None
         self.results: pd.DataFrame = pd.DataFrame()
+        self.last_month = None  # 매월 추가 투자 추적
 
     def set_strategy(self, strategy: BaseStrategy):
         """전략 설정"""
@@ -91,9 +96,27 @@ class SimpleBacktestEngine:
         for idx, (date, row) in enumerate(data_with_signals.iterrows()):
             current_price = row["Close"]
             
-            # 포트폴리오 가격 업데이트
+            # 매월 추가 투자 처리
+            if self.monthly_addition > 0:
+                # Period 변환 시 타임존 정보 손실 경고 회피
+                if isinstance(date, pd.Timestamp):
+                    current_month = date.strftime('%Y-%m')
+                else:
+                    current_month = date.strftime('%Y-%m')
+                if self.last_month != current_month:
+                    self.portfolio.cash += self.monthly_addition
+                    self.last_month = current_month
+                    logger.debug(f"매월 추가 투자: ${self.monthly_addition:,.2f} (날짜: {date.date()})")
+            
+            # 포트폴리오 가격 업데이트 및 배당금 처리
             if self.ticker in self.portfolio.positions:
                 self.portfolio.update_price(self.ticker, current_price)
+                
+                # 배당금 처리
+                if "Dividends" in data.columns:
+                    dividend = row.get("Dividends", 0.0)
+                    if pd.notna(dividend) and dividend > 0:
+                        self.portfolio.receive_dividend(self.ticker, dividend, date)
             
             # 신호 처리
             signal = row.get("Signal", 0)
@@ -136,6 +159,25 @@ class SimpleBacktestEngine:
                             logger.debug(f"리밸런싱 매도 [{self.ticker}] {abs(quantity)}주 @ ${current_price:.2f}")
                     except Exception as e:
                         logger.warning(f"매도 실패 [{self.ticker}] {e}")
+            
+            # BuyHold 전략: 신호 없어도 현금이 있으면 매수
+            elif isinstance(self.strategy, BuyHoldStrategy) and self.portfolio.cash > 0:
+                portfolio_value = self.portfolio.total_value
+                current_quantity = 0
+                if self.portfolio.get_position(self.ticker):
+                    current_quantity = self.portfolio.get_position(self.ticker).quantity
+                
+                # cash만 사용하여 매수
+                commission_rate = self.commission_rate
+                available_cash = self.portfolio.cash
+                quantity = int(available_cash / (current_price * (1 + commission_rate)))
+                
+                if quantity > 0:
+                    try:
+                        self.portfolio.buy(self.ticker, quantity, current_price, date)
+                        logger.debug(f"추가 현금 매수 [{self.ticker}] {quantity}주 @ ${current_price:.2f}")
+                    except Exception as e:
+                        logger.warning(f"매수 실패 [{self.ticker}] {e}")
             
             # 스냅샷
             self.portfolio.snapshot(date)

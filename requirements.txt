@@ -35,3 +35,10 @@ pyyaml>=6.0.0
 # Logging & Utils
 loguru>=0.6.0
 tqdm>=4.65.0
+
+# Live Trading
+alpaca-trade-api>=3.0.0  # Alpaca API for US stocks
+ib-insync>=0.9.86  # Interactive Brokers API
+pykis>=0.1.0  # KIS Developers API (한국투자증권)
+pykiwoom>=0.1.0  # 키움증권 OpenAPI (Windows only)
+python-xing>=0.1.0  # 이베스트투자증권 xingAPI (Windows only)
