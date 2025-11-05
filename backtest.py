@@ -21,6 +21,10 @@ from src.strategy.ma_shannon_hybrid import MovingAverageShannonHybridStrategy
 from src.strategy.ma_shannon_hybrid2 import MovingAverageShannonHybrid2Strategy
 from src.strategy.smart_ma_shannon_hybrid import SmartMovingAverageShannonHybridStrategy as SmartMAStrategy
 from src.strategy.inver_ma import InverseMAStrategy
+from src.strategy.qqq_qid_sgov_ma import QQQQIDSGOVMAStrategy
+from src.strategy.qqq_ema_shannon import QQQEMAShannonStrategy
+from src.strategy.daily_shannon import DailyShannonStrategy
+from src.strategy.qqq_tqqq_qid_ma import QQQTQQQIDMAStrategy
 from src.utils.logger import setup_logger
 from loguru import logger
 
@@ -28,6 +32,7 @@ from loguru import logger
 STRATEGY_MAP = {
     "buyhold": BuyHoldStrategy,
     "shannon": ShannonStrategy,
+    "daily_shannon": DailyShannonStrategy,
     "moving_average": MovingAverageStrategy,
     "ma": MovingAverageStrategy,
     "ma_shannon_hybrid": MovingAverageShannonHybridStrategy,
@@ -35,6 +40,9 @@ STRATEGY_MAP = {
     "smart_ma_shannon_hybrid": SmartMAStrategy,
     "inver_ma": InverseMAStrategy,
     "inverse_ma": InverseMAStrategy,
+    "qqq_qid_sgov_ma": QQQQIDSGOVMAStrategy,
+    "qqq_ema_shannon": QQQEMAShannonStrategy,
+    "qqq_tqqq_qid_ma": QQQTQQQIDMAStrategy,
 }
 
 
@@ -135,6 +143,24 @@ def run_backtest(config_path: str = "config.yml"):
                 logger.warning("다중 종목 백테스팅을 위해 tickers에 주식과 채권 종목을 모두 포함하세요.")
                 continue
         
+        # DailyShannon 전략: bond_ticker가 설정된 경우 다중 종목 사용
+        elif isinstance(strategy, DailyShannonStrategy):
+            if strategy.use_bond:
+                use_multi_asset = True
+                if len(tickers) < 2:
+                    logger.warning(f"{strategy.name}: bond_ticker가 설정되었지만 종목이 1개만 제공되었습니다.")
+                    logger.warning("다중 종목 백테스팅을 위해 tickers에 주식과 채권 종목을 모두 포함하세요.")
+                    continue
+            else:
+                # 현금 버전도 다중 종목 엔진 사용 (리밸런싱 처리를 위해)
+                use_multi_asset = True
+                if not strategy.stock_ticker or strategy.stock_ticker not in tickers:
+                    strategy.stock_ticker = tickers[0]
+                if strategy.stock_ticker not in tickers:
+                    logger.warning(f"{strategy.name}: stock_ticker '{strategy.stock_ticker}'가 assets.tickers에 없습니다.")
+                    logger.warning(f"사용 가능한 종목: {', '.join(tickers)}")
+                    continue
+        
         # MovingAverage 전략: 항상 다중 종목 필요 (주식 + 채권)
         elif isinstance(strategy, MovingAverageStrategy):
             use_multi_asset = True
@@ -214,6 +240,39 @@ def run_backtest(config_path: str = "config.yml"):
                 logger.warning(f"사용 가능한 종목: {', '.join(tickers)}")
                 continue
         
+        # QQQQIDSGOVMA 전략: 다중 종목 사용 (QQQ + TQQQ + QID + SGOV)
+        elif isinstance(strategy, QQQQIDSGOVMAStrategy):
+            use_multi_asset = True
+            required_tickers_list = [strategy.base_ticker, strategy.tqqq_ticker, strategy.qid_ticker, strategy.sgov_ticker]
+            
+            if not all(t in tickers for t in required_tickers_list):
+                logger.warning(f"{strategy.name}: 필요한 종목이 모두 포함되어야 합니다: {required_tickers_list}")
+                logger.warning(f"현재 종목: {', '.join(tickers)}")
+                logger.warning("assets.tickers에 QQQ, TQQQ, QID, SGOV를 모두 포함하세요")
+                continue
+        
+        # QQQEMAShannon 전략: 다중 종목 사용 (QQQ + TQQQ + SGOV + QID)
+        elif isinstance(strategy, QQQEMAShannonStrategy):
+            use_multi_asset = True
+            required_tickers_list = [strategy.base_ticker, strategy.qqq_ticker, strategy.tqqq_ticker, strategy.sgov_ticker, strategy.qid_ticker]
+            
+            if not all(t in tickers for t in required_tickers_list):
+                logger.warning(f"{strategy.name}: 필요한 종목이 모두 포함되어야 합니다: {required_tickers_list}")
+                logger.warning(f"현재 종목: {', '.join(tickers)}")
+                logger.warning("assets.tickers에 QQQ, TQQQ, SGOV, QID를 모두 포함하세요")
+                continue
+        
+        # QQQTQQQIDMA 전략: 다중 종목 사용 (QQQ + TQQQ + QID)
+        elif isinstance(strategy, QQQTQQQIDMAStrategy):
+            use_multi_asset = True
+            required_tickers_list = [strategy.base_ticker, strategy.tqqq_ticker, strategy.qid_ticker]
+            
+            if not all(t in tickers for t in required_tickers_list):
+                logger.warning(f"{strategy.name}: 필요한 종목이 모두 포함되어야 합니다: {required_tickers_list}")
+                logger.warning(f"현재 종목: {', '.join(tickers)}")
+                logger.warning("assets.tickers에 QQQ, TQQQ, QID를 모두 포함하세요")
+                continue
+        
         # 백테스팅 엔진 생성
         if use_multi_asset:
             # 다중 종목 엔진 사용
@@ -234,6 +293,18 @@ def run_backtest(config_path: str = "config.yml"):
                 if hasattr(strategy, 'covered_call_ticker') and strategy.covered_call_ticker:
                     if strategy.covered_call_ticker not in required_tickers:
                         required_tickers.append(strategy.covered_call_ticker)
+            if hasattr(strategy, 'qid_ticker') and strategy.qid_ticker:
+                if strategy.qid_ticker not in required_tickers:
+                    required_tickers.append(strategy.qid_ticker)
+            if hasattr(strategy, 'sgov_ticker') and strategy.sgov_ticker:
+                if strategy.sgov_ticker not in required_tickers:
+                    required_tickers.append(strategy.sgov_ticker)
+            if hasattr(strategy, 'base_ticker') and strategy.base_ticker:
+                if strategy.base_ticker not in required_tickers:
+                    required_tickers.append(strategy.base_ticker)
+            if hasattr(strategy, 'qqq_ticker') and strategy.qqq_ticker:
+                if strategy.qqq_ticker not in required_tickers:
+                    required_tickers.append(strategy.qqq_ticker)
             
             # 요구되는 종목이 모두 data_dict에 있는지 확인
             if not all(t in data_dict for t in required_tickers):
@@ -292,6 +363,20 @@ def run_backtest(config_path: str = "config.yml"):
                 bond_df["Signal"] = 0
                 signals_dict[strategy.bond_ticker] = bond_df
             
+            # DailyShannon 전략: 주식 종목 데이터만 사용하여 신호 생성
+            elif isinstance(strategy, DailyShannonStrategy):
+                stock_data = data_dict[strategy.stock_ticker]
+                df_with_signals = strategy.generate_signals(stock_data)
+                
+                # 주식 종목에 신호 적용
+                signals_dict[strategy.stock_ticker] = df_with_signals
+                
+                # bond_ticker가 있으면 신호 없이 빈 데이터프레임 (신호는 주식 기준으로 생성)
+                if strategy.use_bond and strategy.bond_ticker:
+                    bond_df = data_dict[strategy.bond_ticker].copy()
+                    bond_df["Signal"] = 0
+                    signals_dict[strategy.bond_ticker] = bond_df
+            
             # InverseMA 전략: 기준 종목(QQQ) 데이터만 사용하여 신호 생성
             elif isinstance(strategy, InverseMAStrategy):
                 base_data = data_dict[strategy.base_ticker]
@@ -304,6 +389,49 @@ def run_backtest(config_path: str = "config.yml"):
                 tqqq_df = data_dict[strategy.tqqq_ticker].copy()
                 tqqq_df["Signal"] = 0
                 signals_dict[strategy.tqqq_ticker] = tqqq_df
+            
+            # QQQQIDSGOVMA 전략: 기준 종목(QQQ) 데이터만 사용하여 신호 생성
+            elif isinstance(strategy, QQQQIDSGOVMAStrategy):
+                base_data = data_dict[strategy.base_ticker]
+                df_with_signals = strategy.generate_signals(base_data)
+                
+                # QQQ에 신호 적용
+                signals_dict[strategy.base_ticker] = df_with_signals
+                
+                # 다른 종목들은 신호 없이 빈 데이터프레임
+                for ticker in [strategy.tqqq_ticker, strategy.qid_ticker, strategy.sgov_ticker]:
+                    ticker_df = data_dict[ticker].copy()
+                    ticker_df["Signal"] = 0
+                    signals_dict[ticker] = ticker_df
+            
+            # QQQTQQQIDMA 전략: 기준 종목(QQQ) 데이터만 사용하여 신호 생성
+            elif isinstance(strategy, QQQTQQQIDMAStrategy):
+                base_data = data_dict[strategy.base_ticker]
+                df_with_signals = strategy.generate_signals(base_data)
+                
+                # QQQ에 신호 적용
+                signals_dict[strategy.base_ticker] = df_with_signals
+                
+                # 다른 종목들은 신호 없이 빈 데이터프레임
+                for ticker in [strategy.tqqq_ticker, strategy.qid_ticker]:
+                    ticker_df = data_dict[ticker].copy()
+                    ticker_df["Signal"] = 0
+                    signals_dict[ticker] = ticker_df
+            
+            # QQQEMAShannon 전략: 기준 종목(QQQ) 데이터만 사용하여 신호 생성
+            elif isinstance(strategy, QQQEMAShannonStrategy):
+                base_data = data_dict[strategy.base_ticker]
+                df_with_signals = strategy.generate_signals(base_data)
+                
+                # QQQ에 신호 적용
+                signals_dict[strategy.base_ticker] = df_with_signals
+                
+                # 다른 종목들은 신호 없이 빈 데이터프레임
+                for ticker in [strategy.qqq_ticker, strategy.tqqq_ticker, strategy.sgov_ticker, strategy.qid_ticker]:
+                    if ticker != strategy.base_ticker:
+                        ticker_df = data_dict[ticker].copy()
+                        ticker_df["Signal"] = 0
+                        signals_dict[ticker] = ticker_df
             
             else:
                 # Shannon 등 다른 전략: 각 종목별로 신호 생성
@@ -359,6 +487,16 @@ def run_backtest(config_path: str = "config.yml"):
         
         # 결과 출력
         summary = engine.get_summary()
+        
+        # 현금 버전 통계 출력
+        if isinstance(summary, dict) and "현금버전 통계" in summary:
+            logger.info("="*70)
+            logger.info("현금 버전 상세 통계")
+            logger.info("="*70)
+            stats = summary["현금버전 통계"]
+            for key, value in stats.items():
+                logger.info(f"  {key}: {value}")
+            logger.info("="*70)
         
         logger.info("\n" + "-"*70)
         logger.info("결과 요약")

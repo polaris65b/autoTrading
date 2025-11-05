@@ -275,19 +275,44 @@ class MovingAverageShannonHybridStrategy(BaseStrategy):
                 quantity_diff = target_quantity - current_quantity
                 # 매도만 허용 (quantity_diff < 0)
                 if quantity_diff < 0:
+                    logger.warning(
+                        f"🔴 [전략 로직] 현금버전 TQQQ > 50% 감지 - 매도 실행: "
+                        f"현재={current_stock_pct:.2%} 목표={self.stock_pct:.2%} "
+                        f"현재수량={current_quantity} 목표수량={target_quantity} "
+                        f"매도 필요: {abs(quantity_diff)}주"
+                    )
                     return quantity_diff
+                logger.warning(
+                    f"🟡 [전략 로직] 현금버전 TQQQ > 50%지만 quantity_diff >= 0 (매도 안 됨!): "
+                    f"현재={current_stock_pct:.2%} 현재수량={current_quantity} 목표수량={target_quantity} "
+                    f"quantity_diff={quantity_diff}"
+                )
                 return 0
             
             # BIL/QYLD 버전 또는 현금 버전(하한선 체크): 기존 밴딩 로직
-            if self.check_banding_rebalance(
+            needs_rebalance = self.check_banding_rebalance(
                 portfolio_value=portfolio_value,
                 current_stock_value=current_stock_value,
                 price=price,
                 current_quantity=current_quantity
-            ):
+            )
+            
+            if not self.use_bond:
+                logger.debug(
+                    f"[전략 로직] 현금버전 check_banding_rebalance: "
+                    f"결과={needs_rebalance} 현재비율={current_stock_pct:.2%}"
+                )
+            
+            if needs_rebalance:
                 target_value = portfolio_value * self.stock_pct
                 target_quantity = int(target_value / price)
                 quantity_diff = target_quantity - current_quantity
+                
+                if not self.use_bond:
+                    logger.debug(
+                        f"[전략 로직] 현금버전 리밸런싱 필요: "
+                        f"목표={self.stock_pct:.2%} quantity_diff={quantity_diff}"
+                    )
                 
                 # 매수 케이스 (quantity_diff > 0)
                 if quantity_diff > 0:
@@ -299,6 +324,12 @@ class MovingAverageShannonHybridStrategy(BaseStrategy):
                     if available_cash < required_cash:
                         available_quantity = int(available_cash / (price * (1 + commission_rate)))
                         quantity_diff = min(quantity_diff, available_quantity)
+                        if not self.use_bond:
+                            logger.debug(
+                                f"[전략 로직] 현금버전 현금부족: "
+                                f"필요=${required_cash:.2f} 보유=${available_cash:.2f} "
+                                f"조정량={quantity_diff}"
+                            )
                 
                 # 매도 케이스 (quantity_diff < 0): 현금 버전에서는 명시적으로 처리
                 # 매도는 허용하되, 목표 비율(50%)로 조정
