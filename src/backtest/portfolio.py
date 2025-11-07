@@ -94,24 +94,27 @@ class Portfolio:
         if ticker in self.positions:
             self.positions[ticker].current_price = price
     
-    def receive_dividend(self, ticker: str, dividend_per_share: float, date: datetime):
+    def receive_dividend(self, ticker: str, dividend_per_share: float, date: datetime, tax_rate: float = 0.154):
         """
-        배당금 수령
+        배당금 수령 (세율 적용)
         
         Args:
             ticker: 종목 코드
             dividend_per_share: 주당 배당금
             date: 배당일
+            tax_rate: 배당 세율 (기본값: 15.4%)
         """
         if ticker not in self.positions:
             return
         
         pos = self.positions[ticker]
-        total_dividend = pos.quantity * dividend_per_share
+        gross_dividend = pos.quantity * dividend_per_share
         
-        if total_dividend > 0:
-            self.cash += total_dividend
-            logger.debug(f"배당금 수령 [{ticker}] {pos.quantity}주 × ${dividend_per_share:.4f} = ${total_dividend:.2f}")
+        if gross_dividend > 0:
+            tax_amount = gross_dividend * tax_rate
+            net_dividend = gross_dividend * (1 - tax_rate)
+            self.cash += net_dividend
+            logger.debug(f"배당금 수령 [{ticker}] {pos.quantity}주 × ${dividend_per_share:.4f} = ${gross_dividend:.2f} (세전) → ${net_dividend:.2f} (세후, 세금: ${tax_amount:.2f})")
 
     def buy(
         self,

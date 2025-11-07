@@ -1,288 +1,86 @@
 # =============================================================================
-# 백테스팅 설정 템플릿 (복사해서 사용하세요)
+# 백테스팅 설정 (최종 3개 전략 비교 테스트)
 # =============================================================================
-# 
-# 🔥 핵심: 종목만 바꾸면 바로 사용 가능!
-# 
-# 사용 방법:
-#   1. 이 파일을 복사: cp config.yml my_test.yml
-#   2. "종목" 부분만 원하는 티커로 변경
-#   3. 실행: python backtest.py -c my_test.yml
-# =============================================================================
-
 
 assets:
   tickers:
-    - "TQQQ"  # 주식 종목 (예: "AAPL", "GOOGL", "TSLA", "TQQQ")
-    - "BIL"   # 채권 종목 (MovingAverage 전략용 단기채권 ETF)
-    - "QQQ"  # 주식 종목 (MovingAverage 전략용 나스닥 100 ETF)
-    - "QLD"  # 주식 종목 (MovingAverage 전략용 나스닥 100 ETF)
-    - "UPRO"  # 주식 종목
-    #- "JEPI"  # 주식 종목
-    - "QYLD"  # 커버드콜 ETF (나스닥 100 기반, 2013년 상장)
-    - "XYLD"  # 커버드콜 ETF (S&P 500 기반, 2013년 상장)
+    - "TQQQ"
+    - "QQQ" # MA 계산을 위해 필요
+    - "BIL" # 채권 옵션
+    - "JEPQ"
     - "QQQI"
-    - "QID"  # QQQ 역방향 ETF (qqq_qid_sgov_ma 전략용)
-    - "SGOV"  # 단기 국채 ETF (qqq_qid_sgov_ma 전략용)
 
 backtest:
-  start_date: "2020-11-01"  # 원하면 시작일 변경
-  end_date: "2023-11-01"    # 원하면 종료일 변경
-  initial_cash: 1000000  # 초기 투자금
-  monthly_addition: 100000  # 매월 추가 투자금
-  exchange_rate: 1500  # 환율
-  commission_rate: 0.01  # 수수료율 (0.1%)
+  start_date: "2024-02-01"
+  end_date: "2025-11-06"
+  initial_cash: 10000000
+  monthly_addition: 0
+  exchange_rate: 1400
+  commission_rate: 0.01
 
 portfolio:
   strategies:
-    # Buy & Hold 전략 (100% 투자)
+    # 1. 이평선
+    - name: "moving_average"
+      enabled: true
+      params:
+        stock_ticker: "TQQQ"
+        bond_ticker: "BIL"
+        ma_period: 200
+
+    # 2. 셰넌
+    - name: "shannon"
+      enabled: true
+      params:
+        stock_ticker: "TQQQ"
+        bond_ticker: "BIL"
+        band_threshold: 0.1
+
+    - name: "shannon"
+      enabled: true
+      params:
+        stock_ticker: "TQQQ"
+        bond_ticker: "JEPQ"
+        band_threshold: 0.1
+
+    - name: "shannon"
+      enabled: true
+      params:
+        stock_ticker: "TQQQ"
+        bond_ticker: "QQQI"
+        band_threshold: 0.1
+    
+
+   # 3. 이평선 + 섀넌
+    - name: "safe_ma_shannon"
+      enabled: true
+      params:
+        stock_ticker: "TQQQ"
+        bond_ticker: "BIL"
+        ma_period: 200
+        stock_pct: 0.5
+        band_threshold: 0.1
+
+    # --- QQQ 비교용 --
     - name: "buyhold"
       enabled: true
       params:
-        position_pct: 1.0        # 100% 투자
-        stock_ticker: "TQQQ"     # 주식 종목 (선택사항, 설정 안 하면 첫 번째 ticker 사용)
-    
-    #########################################################
-    # 섀넌 전략 - 다양한 비율 비교 (TQQQ 같은 고변동성 자산은 더 높은 비율이 유리할 수 있음)
-    
-    # 30:70 (주식 30%, 현금 70%) - 보수적
-    - name: "shannon"
-      enabled: false
-      params:
-        stock_pct: 0.3
-        stock_ticker: "TQQQ"
-        bond_ticker: "BIL"
-        rebalance_mode: "banding"
-        band_threshold: 0.1
-    
-    # 40:60 (주식 40%, 현금 60%)
-    - name: "shannon"
-      enabled: false
-      params:
-        stock_pct: 0.4
-        stock_ticker: "TQQQ"
-        bond_ticker: "BIL"
-        rebalance_mode: "banding"
-        band_threshold: 0.1
-    
-    # 50:50 (주식 50%, 현금 50%) - 클래식 섀넌
-    - name: "shannon"
-      enabled: true
-      params:
-        stock_pct: 0.5
-        stock_ticker: "TQQQ"
-        bond_ticker: "BIL"
-        rebalance_mode: "banding"
-        band_threshold: 0.1
-    
-    # 60:40 (주식 60%, 현금 40%) - 고변동성 자산에 적합할 수 있음
-    - name: "shannon"
-      enabled: false
-      params:
-        stock_pct: 0.6
-        stock_ticker: "TQQQ"
-        bond_ticker: "BIL"
-        rebalance_mode: "banding"
-        band_threshold: 0.1
-    
-    # 70:30 (주식 70%, 현금 30%)
-    - name: "shannon"
-      enabled: false
-      params:
-        stock_pct: 0.7
-        stock_ticker: "TQQQ"
-        bond_ticker: "BIL"
-        rebalance_mode: "banding"
-        band_threshold: 0.1
-    
-    # 80:20 (주식 80%, 현금 20%) - 매우 공격적
-    - name: "shannon"
-      enabled: false
-      params:
-        stock_pct: 0.8
-        stock_ticker: "TQQQ"
-        bond_ticker: "BIL"
-        rebalance_mode: "banding"
-        band_threshold: 0.1
-    
-    #########################################################
-    # Daily 섀넌 전략 - 다양한 비율 비교
-    
-    # Daily 30:70
-    - name: "daily_shannon"
-      enabled: false
-      params:
-        stock_pct: 0.3
-        stock_ticker: "TQQQ"
-        # bond_ticker: "BIL"
-    
-    # Daily 40:60
-    - name: "daily_shannon"
-      enabled: false
-      params:
-        stock_pct: 0.4
-        stock_ticker: "TQQQ"
-        # bond_ticker: "BIL"
-    
-    # Daily 50:50 - 클래식
-    - name: "daily_shannon"
-      enabled: true
-      params:
-        stock_pct: 0.5
-        stock_ticker: "TQQQ"
-        # bond_ticker: "BIL"
-    
-    # Daily 60:40
-    - name: "daily_shannon"
-      enabled: false
-      params:
-        stock_pct: 0.6
-        stock_ticker: "TQQQ"
-        # bond_ticker: "BIL"
-    
-    # Daily 70:30
-    - name: "daily_shannon"
-      enabled: false
-      params:
-        stock_pct: 0.7
-        stock_ticker: "TQQQ"
-        # bond_ticker: "BIL"
-    
-    # Daily 80:20
-    - name: "daily_shannon"
-      enabled: false
-      params:
-        stock_pct: 0.8
-        stock_ticker: "TQQQ"
-        # bond_ticker: "BIL"
-    #########################################################
-    # QQQ 200일선 기반 TQQQ/QID 전략
-    # 200일선 위: TQQQ 보유, 200일선 밑: QID 보유
-    - name: "qqq_tqqq_qid_ma"
-      enabled: true
-      params:
-        base_ticker: "QQQ"       # 이동평균선 계산 기준 종목
-        tqqq_ticker: "TQQQ"      # 200일선 위 시 보유
-        qid_ticker: "QID"        # 200일선 밑 시 보유
-        ma_period: 200           # 이동평균 기간 (200일선)
-    #########################################################
-    # 이동평균선 전략 - 위 아래
-    - name: "moving_average"
-      enabled: false
-      params:
-        stock_ticker: "TQQQ"     # 주식 종목 (200일선 위)
-        #bond_ticker: "SGOV"      # 단기채권 ETF (200일선 아래, 현금 대체)
-        ma_period: 200           # 이동평균 기간 (200일선)
-    
-    - name: "moving_average"
-      enabled: true
-      params:
-        stock_ticker: "TQQQ"     # 주식 종목 (200일선 위)
-        #bond_ticker: "QYLD"      # 커버드콜 ETF (200일선 아래, 나스닥 100 기반, 2013년 상장)
-        ma_period: 200           # 이동평균 기간 (200일선)
-    
-    - name: "moving_average"
-      enabled: false
-      params:
-        stock_ticker: "TQQQ"     # 주식 종목 (200일선 위)
-        bond_ticker: "BIL"      # 커버드콜 ETF (200일선 아래, S&P 500 기반, 2013년 상장)
-        ma_period: 200           # 이동평균 기간 (200일선)
-    #########################################################
-    # ma_shannon_hybrid - 현금 버전 (200일선 아래: TQQQ 50% + 현금 50%)
-    - name: "ma_shannon_hybrid"
-      enabled: true
-      params:
-        stock_ticker: "TQQQ"         # 주식 종목 (assets.tickers에 포함 필요)
-        # bond_ticker: None          # 현금 사용 (설정 안 하면 현금)
-        ma_period: 200                # 이동평균 기간 (기본: 200일선)
-        stock_pct: 0.5               # 섀넌 모드에서 주식 비율 (기본: 0.5 = 50%)
-        band_threshold: 0.1          # 밴딩 임계값 (기본: 0.1 = 10%)
-    
-    # ma_shannon_hybrid - BIL 버전 (200일선 아래: TQQQ 50% + BIL 50%)
-    - name: "ma_shannon_hybrid"
-      enabled: true
-      params:
-        stock_ticker: "TQQQ"         # 주식 종목 (assets.tickers에 포함 필요)
-        bond_ticker: "BIL"           # 채권 종목 (assets.tickers에 포함 필요)
-        ma_period: 200                # 이동평균 기간 (기본: 200일선)
-        stock_pct: 0.5               # 섀넌 모드에서 주식 비율 (기본: 0.5 = 50%)
-        band_threshold: 0.1          # 밴딩 임계값 (기본: 0.1 = 10%)
-    
-    # ma_shannon_hybrid - QYLD 버전 (200일선 아래: TQQQ 50% + QYLD 50%)
-    - name: "ma_shannon_hybrid"
-      enabled: false
-      params:
-        stock_ticker: "TQQQ"         # 주식 종목 (assets.tickers에 포함 필요)
-        bond_ticker: "QYLD"          # 커버드콜 ETF (assets.tickers에 포함 필요)
-        ma_period: 200                # 이동평균 기간 (기본: 200일선)
-        stock_pct: 0.5               # 섀넌 모드에서 주식 비율 (기본: 0.5 = 50%)
-        band_threshold: 0.1          # 밴딩 임계값 (기본: 0.1 = 10%)
-    #########################################################
-    - name: "ma_shannon_hybrid2"
-      enabled: false  # TQQQ 매도 금지 버전 (200일선 아래에서 TQQQ->BIL 전환 불가)
-      params:
-        stock_ticker: "TQQQ"         # 주식 종목 (assets.tickers에 포함 필요)
-        bond_ticker: "BIL"           # 채권 종목 (assets.tickers에 포함 필요)
-        ma_period: 200                # 이동평균 기간 (기본: 200일선)
-        stock_pct: 0.5               # 섀넌 모드에서 주식 비율 (기본: 0.5 = 50%)
-        band_threshold: 0.05          # 밴딩 임계값 (기본: 0.1 = 10%)
-    
-    - name: "smart_ma_shannon_hybrid"
-      enabled: false  # 고도화 전략 (현재 수익률 낮음)
-      params:
-        stock_ticker: "TQQQ"         # 주식 종목 (assets.tickers에 포함 필요)
-        sma_period: 200              # 단순 이동평균 기간 (기본: 200일)
-        ema_period: 50               # 지수 이동평균 기간 (기본: 50일)
-        bb_period: 20                # 볼린저 밴드 기간 (기본: 20일)
-        bb_std: 2.0                  # 볼린저 밴드 표준편차 (기본: 2.0)
-        base_stock_pct: 0.5          # 기본 주식 비율 (기본: 0.5 = 50%)
-        trailing_stop_pct: 0.20      # 트레일링 스탑 비율 (기본: 0.20 = 20%)
-    
-    - name: "inver_ma"
-      enabled: false  # Inverse MA 전략
-      params:
-        base_ticker: "QQQ"           # 이동평균선 계산 기준 종목 (assets.tickers에 포함 필요)
-        qqq_ticker: "QQQ"            # QQQ 종목 (assets.tickers에 포함 필요)
-        tqqq_ticker: "TQQQ"          # TQQQ 종목 (assets.tickers에 포함 필요)
-        ma_period: 200               # 이동평균 기간 (기본: 200일선)
-        stock1_pct: 0.5             # QQQ 목표 비율 (기본: 0.5 = 50%)
-        stock2_pct: 0.5             # TQQQ 목표 비율 (기본: 0.5 = 50%)
-        band_threshold: 0.05         # 밴딩 임계값 (기본: 0.05 = 5%)
-      # 전략 설명:
-      # - 200일선 위: QQQ 50% + TQQQ 50% (밴딩 리밸런싱)
-      # - 200일선 아래: TQQQ 100% 보유
-      # - BELOW 모드 진입 시점의 QQQ 전고점을 추적하고, 회복까지 TQQQ 매도 금지
-    - name: "qqq_qid_sgov_ma"
-      enabled: false
-      params:
-        base_ticker: "QQQ"
-        tqqq_ticker: "TQQQ"
-        qid_ticker: "QID"
-        sgov_ticker: "SGOV"
-        ma_period: 200
-        qid_pct: 0.5
-        sgov_pct: 0.5
-        rebalance_threshold: 0.05
-    
-    - name: "qqq_ema_shannon"
-      enabled: false
-      params:
-        base_ticker: "QQQ"
-        qqq_ticker: "QQQ"
-        tqqq_ticker: "TQQQ"
-        sgov_ticker: "SGOV"
-        qid_ticker: "QID"
-        ema_period: 200
-        above_pct1: 0.5  # QQQ 목표 비율 (ABOVE 모드)
-        above_pct2: 0.5  # TQQQ 목표 비율 (ABOVE 모드)
-        below_pct1: 1.0  # SGOV 목표 비율 (BELOW 모드)
-        below_pct2: 0.0  # QID 목표 비율 (BELOW 모드)
-        band_threshold: 0.10  # 10% 밴딩 임계값 (45:55)
-      # 전략 설명:
-      # - 200EMA 위: QQQ 50% + TQQQ 50% (45:55 밴딩 리밸런싱)
-      # - 200EMA 아래: SGOV 50% + QID 50% (45:55 밴딩 리밸런싱)
+        stock_ticker: "QQQI"
+        position_pct: 1.0
 
-    # 비교하려는 전략은 enabled: true, 비교 안 하려면 enabled: false
+   - name: "buyhold"
+     enabled: true
+     params:
+       stock_ticker: "JEPQ"
+       position_pct: 1.0
+
+   - name: "buyhold"
+     enabled: true
+     params:
+       stock_ticker: "QLD"
+       position_pct: 1.0
+
+
 
 risk:
   max_positions: 10
@@ -291,7 +89,7 @@ risk:
     enabled: false
     threshold: -0.10
   take_profit:
-    enabled: false
+    enabled: false # 이번 테스트에서는 익절 기능은 제외
     threshold: 0.20
 
 report:

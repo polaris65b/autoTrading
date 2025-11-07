@@ -38,11 +38,15 @@ class ShannonStrategy(BaseStrategy):
         """
         super().__init__(name, params or {})
         self.stock_pct = self.params.get("stock_pct", 0.5)  # 주식 비율 (50%)
+        if self.stock_pct is None:
+            self.stock_pct = 0.5
         self.stock_ticker = self.params.get("stock_ticker", None)  # 주식 종목
         self.bond_ticker = self.params.get("bond_ticker", None)  # 채권 종목 (None이면 현금)
         self.rebalance_mode = self.params.get("rebalance_mode", "banding")  # 리밸런싱 방식
         self.rebalance_freq = self.params.get("rebalance_freq", 30)  # 리밸런싱 주기 (30일)
         self.band_threshold = self.params.get("band_threshold", 0.1)  # 밴딩 임계값 (10%)
+        if self.band_threshold is None:
+            self.band_threshold = 0.1
         self.last_rebalance_date = None
         
         # 채권 사용 여부 확인

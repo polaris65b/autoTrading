@@ -23,7 +23,8 @@ class MultiAssetBacktestEngine:
         tickers: List[str],
         initial_cash: Optional[float] = None,
         commission_rate: Optional[float] = None,
-        monthly_addition: Optional[float] = None
+        monthly_addition: Optional[float] = None,
+        risk_config: Optional[Dict] = None
     ):
         """
         초기화
@@ -33,6 +34,7 @@ class MultiAssetBacktestEngine:
             initial_cash: 초기 자본금
             commission_rate: 수수료율
             monthly_addition: 매월 추가 투자금
+            risk_config: 리스크 관리 설정
         """
         settings = get_settings()
         
@@ -40,6 +42,10 @@ class MultiAssetBacktestEngine:
         self.initial_cash = initial_cash or settings.DEFAULT_INITIAL_CASH
         self.commission_rate = commission_rate or settings.DEFAULT_COMMISSION
         self.monthly_addition = monthly_addition or 0
+        
+        self.risk_config = risk_config or {}
+        self.take_profit_enabled = self.risk_config.get("take_profit", {}).get("enabled", False)
+        self.take_profit_threshold = self.risk_config.get("take_profit", {}).get("threshold", 0.0)
         
         self.portfolio = Portfolio(
             initial_cash=self.initial_cash,
@@ -150,6 +156,8 @@ class MultiAssetBacktestEngine:
         
         # 백테스팅 실행
         for date in all_dates:
+            processed_tickers = set()
+            
             # 매월 추가 투자 처리
             if self.monthly_addition > 0:
                 # Period 변환 시 타임존 정보 손실 경고 회피
@@ -180,9 +188,31 @@ class MultiAssetBacktestEngine:
                                 dividend = df.loc[date, "Dividends"]
                                 if pd.notna(dividend) and dividend > 0:
                                     self.portfolio.receive_dividend(ticker, dividend, date)
-            
+
+            # 익절(Take Profit) 처리
+            if self.take_profit_enabled and self.take_profit_threshold > 0:
+                for ticker in list(self.portfolio.positions.keys()):
+                    if ticker in processed_tickers:
+                        continue
+
+                    position = self.portfolio.positions.get(ticker)
+                    if position and position.quantity > 0:
+                        current_price = prices.get(ticker)
+                        if current_price is None:
+                            continue
+
+                        unrealized_pnl_pct = (current_price - position.avg_price) / position.avg_price
+                        if unrealized_pnl_pct >= self.take_profit_threshold:
+                            try:
+                                sell_quantity = position.quantity  # 수정: 매도 전 수량 저장
+                                self.portfolio.sell(ticker, sell_quantity, current_price, date)
+                                logger.info(f"익절 매도 [{ticker}]: {sell_quantity}주 @ ${current_price:.2f} (수익률: {unrealized_pnl_pct:.2%})")
+                                processed_tickers.add(ticker)
+                            except Exception as e:
+                                logger.warning(f"익절 매도 실패 [{ticker}]: {e}")
+
             # MovingAverage 전략 특별 처리: 주식 종목 신호 발생 시 모든 종목 처리
-            processed_tickers = set()
+            # processed_tickers = set()
             
             # MovingAverage/MovingAverageBreakout 전략의 경우: 기준 종목에서 신호나 목표 종목 정보 확인
             if hasattr(self.strategy, 'stock_ticker') or hasattr(self.strategy, 'base_ticker'):
@@ -255,19 +285,25 @@ class MultiAssetBacktestEngine:
                                 # 가격 먼저 읽기
                                 if self.strategy.stock_ticker in prices:
                                     stock_price = prices[self.strategy.stock_ticker]
+                                    if stock_price is None:
+                                        stock_price = 0.0
                                 if self.strategy.use_bond and self.strategy.bond_ticker and self.strategy.bond_ticker in prices:
                                     bond_price = prices[self.strategy.bond_ticker]
+                                    if bond_price is None:
+                                        bond_price = 0.0
                                 
                                 if self.strategy.stock_ticker in self.portfolio.positions:
                                     pos = self.portfolio.get_position(self.strategy.stock_ticker)
                                     stock_quantity = pos.quantity
-                                    stock_value = stock_quantity * stock_price
+                                    if stock_price is not None:
+                                        stock_value = stock_quantity * stock_price
                                 
                                 if self.strategy.use_bond and self.strategy.bond_ticker:
                                     if self.strategy.bond_ticker in self.portfolio.positions:
                                         pos = self.portfolio.get_position(self.strategy.bond_ticker)
                                         bond_quantity = pos.quantity
-                                        bond_value = bond_quantity * bond_price
+                                        if bond_price is not None:
+                                            bond_value = bond_quantity * bond_price
                                 else:
                                     # 현금 버전: bond_value는 현금으로 계산
                                     bond_value = self.portfolio.cash
@@ -359,7 +395,9 @@ class MultiAssetBacktestEngine:
                                             continue
                                         
                                         portfolio_value = self.portfolio.total_value
-                                        ticker_price = prices[ticker]
+                                        ticker_price = prices.get(ticker, 0.0)
+                                        if ticker_price is None:
+                                            ticker_price = 0.0
                                         ticker_current_quantity = 0
                                         if self.portfolio.get_position(ticker):
                                             ticker_current_quantity = self.portfolio.get_position(ticker).quantity
@@ -370,12 +408,18 @@ class MultiAssetBacktestEngine:
                                             other_value = bond_value if self.strategy.use_bond else self.portfolio.cash
                                         else:
                                             # bond_ticker 처리 시: TQQQ 가치
-                                            other_value = stock_value
+                                            other_value = stock_value if stock_value is not None else 0.0
                                         
                                         # 현금 버전과 bond 버전 모두 current_bond_value 전달
                                         # 현금 버전: bond_value = portfolio.cash
                                         # bond 버전: bond_value = bond_ticker 가치
                                         current_bond_val = bond_value if self.strategy.use_bond else self.portfolio.cash
+                                        if current_bond_val is None:
+                                            current_bond_val = 0.0
+                                        
+                                        # stock_value도 None 체크
+                                        if stock_value is None:
+                                            stock_value = 0.0
                                         
                                         # 현금 버전: calculate_position_size 호출 전 로그
                                         if not self.strategy.use_bond and ticker == self.strategy.stock_ticker and stock_signal == 3:

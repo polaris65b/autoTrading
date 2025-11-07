@@ -1,0 +1,61 @@
+# =============================================================================
+# 적응형 Shannon 전략 테스트
+# 평상시 QQQI 100% → 200일선 이탈 시 TQQQ+QQQI Shannon 50:50
+# =============================================================================
+
+assets:
+  tickers:
+    - "TQQQ"
+    - "QQQ" # 200일선 계산용
+    - "QQQI"
+
+backtest:
+  start_date: "2024-02-01"
+  end_date: "2025-11-06"
+  initial_cash: 10000000
+  monthly_addition: 0
+  exchange_rate: 1400
+  commission_rate: 0.001  # 0.1%
+
+portfolio:
+  strategies:
+    # 적응형 Shannon (제안 전략)
+    - name: "adaptive_shannon"
+      enabled: true
+      params:
+        base_ticker: "QQQ"    # 200일선 계산용
+        stock_ticker: "TQQQ"
+        bond_ticker: "QQQI"
+        ma_period: 200
+        stock_pct: 0.5
+        band_threshold: 0.1
+
+    # 비교: QQQI 100% Buy&Hold
+    - name: "buyhold"
+      enabled: true
+      params:
+        stock_ticker: "QQQI"
+        position_pct: 1.0
+
+    # 비교: 일반 Shannon (TQQQ+QQQI)
+    - name: "shannon"
+      enabled: true
+      params:
+        stock_ticker: "TQQQ"
+        bond_ticker: "QQQI"
+        rebalance_mode: "banding"
+        band_threshold: 0.1
+
+risk:
+  max_positions: 10
+  max_position_weight: 1.0
+  stop_loss:
+    enabled: false
+  take_profit:
+    enabled: false
+
+report:
+  save_results: true
+  generate_charts: false
+  verbose: false
+

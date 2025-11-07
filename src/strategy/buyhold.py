@@ -78,6 +78,7 @@ class BuyHoldStrategy(BaseStrategy):
         Returns:
             거래 수량
         """
+        logger.debug(f"BuyHoldStrategy kwargs: {kwargs}")
         if signal == 1:  # 첫날 매수
             # 수수료를 고려하여 여유를 둠
             commission_rate = kwargs.get("commission_rate", 0.001)
